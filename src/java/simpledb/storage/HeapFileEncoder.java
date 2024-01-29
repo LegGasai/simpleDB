@@ -17,43 +17,43 @@ import java.util.List;
 
 public class HeapFileEncoder {
 
-  /** Convert the specified tuple list (with only integer fields) into a binary
-   * page file. <br>
-   *
-   * The format of the output file will be as specified in HeapPage and
-   * HeapFile.
-   *
-   * @see HeapPage
-   * @see HeapFile
-   * @param tuples the tuples - a list of tuples, each represented by a list of integers that are
-   *        the field values for that tuple.
-   * @param outFile The output file to write data to
-   * @param npagebytes The number of bytes per page in the output file
-   * @param numFields the number of fields in each input tuple
-   * @throws IOException if the temporary/output file can't be opened
-   */
-  public static void convert(List<List<Integer>> tuples, File outFile, int npagebytes, int numFields) throws IOException {
-      File tempInput = File.createTempFile("tempTable", ".txt");
-      tempInput.deleteOnExit();
-      BufferedWriter bw = new BufferedWriter(new FileWriter(tempInput));
-      for (List<Integer> tuple : tuples) {
-          int writtenFields = 0;
-          for (Integer field : tuple) {
-              writtenFields++;
-              if (writtenFields > numFields) {
-                  throw new RuntimeException("Tuple has more than " + numFields + " fields: (" +
-                          Utility.listToString(tuple) + ")");
+      /** Convert the specified tuple list (with only integer fields) into a binary
+       * page file. <br>
+       *
+       * The format of the output file will be as specified in HeapPage and
+       * HeapFile.
+       *
+       * @see HeapPage
+       * @see HeapFile
+       * @param tuples the tuples - a list of tuples, each represented by a list of integers that are
+       *        the field values for that tuple.
+       * @param outFile The output file to write data to
+       * @param npagebytes The number of bytes per page in the output file
+       * @param numFields the number of fields in each input tuple
+       * @throws IOException if the temporary/output file can't be opened
+       */
+      public static void convert(List<List<Integer>> tuples, File outFile, int npagebytes, int numFields) throws IOException {
+          File tempInput = File.createTempFile("tempTable", ".txt");
+          tempInput.deleteOnExit();
+          BufferedWriter bw = new BufferedWriter(new FileWriter(tempInput));
+          for (List<Integer> tuple : tuples) {
+              int writtenFields = 0;
+              for (Integer field : tuple) {
+                  writtenFields++;
+                  if (writtenFields > numFields) {
+                      throw new RuntimeException("Tuple has more than " + numFields + " fields: (" +
+                              Utility.listToString(tuple) + ")");
+                  }
+                  bw.write(String.valueOf(field));
+                  if (writtenFields < numFields) {
+                      bw.write(',');
+                  }
               }
-              bw.write(String.valueOf(field));
-              if (writtenFields < numFields) {
-                  bw.write(',');
-              }
+              bw.write('\n');
           }
-          bw.write('\n');
+          bw.close();
+          convert(tempInput, outFile, npagebytes, numFields);
       }
-      bw.close();
-      convert(tempInput, outFile, npagebytes, numFields);
-  }
 
       public static void convert(File inFile, File outFile, int npagebytes,
                  int numFields) throws IOException {
@@ -62,11 +62,11 @@ public class HeapFileEncoder {
       convert(inFile,outFile,npagebytes,numFields,ts);
       }
 
-  public static void convert(File inFile, File outFile, int npagebytes,
-                 int numFields, Type[] typeAr)
-      throws IOException {
-      convert(inFile,outFile,npagebytes,numFields,typeAr,',');
-  }
+      public static void convert(File inFile, File outFile, int npagebytes,
+                     int numFields, Type[] typeAr)
+          throws IOException {
+          convert(inFile,outFile,npagebytes,numFields,typeAr,',');
+      }
 
    /** Convert the specified input text file into a binary
     * page file. <br>
@@ -92,7 +92,6 @@ public class HeapFileEncoder {
   public static void convert(File inFile, File outFile, int npagebytes,
                  int numFields, Type[] typeAr, char fieldSeparator)
       throws IOException {
-
       int nrecbytes = 0;
       for (int i = 0; i < numFields ; i++) {
           nrecbytes += typeAr[i].getLen();

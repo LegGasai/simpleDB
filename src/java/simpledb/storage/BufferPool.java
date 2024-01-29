@@ -10,6 +10,7 @@ import simpledb.transaction.TransactionId;
 import java.io.*;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * BufferPool manages the reading and writing of pages into memory from
@@ -33,6 +34,10 @@ public class BufferPool {
     constructor instead. */
     public static final int DEFAULT_PAGES = 50;
 
+    private final int numPages;
+
+    private final ConcurrentMap<PageId,Page> cachePages;
+
     /**
      * Creates a BufferPool that caches up to numPages pages.
      *
@@ -40,6 +45,8 @@ public class BufferPool {
      */
     public BufferPool(int numPages) {
         // some code goes here
+        this.numPages = numPages;
+        this.cachePages = new ConcurrentHashMap<>();
     }
     
     public static int getPageSize() {
@@ -71,9 +78,25 @@ public class BufferPool {
      * @param pid the ID of the requested page
      * @param perm the requested permissions on the page
      */
-    public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
+    public Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
         // some code goes here
+        if (pid!=null){
+            if (this.cachePages.containsKey(pid)){
+                return this.cachePages.get(pid);
+            }else{
+                // need to be add to buffer pool
+                if (this.cachePages.size()>=this.numPages){
+                    throw new DbException("Pages number has been up to max numPages!");
+                }else{
+                    DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
+                    Page page = file.readPage(pid);
+                    cachePages.put(pid,page);
+                    return page;
+                }
+            }
+        }
+        // todo
         return null;
     }
 
