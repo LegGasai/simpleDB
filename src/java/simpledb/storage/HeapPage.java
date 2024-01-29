@@ -8,6 +8,7 @@ import simpledb.transaction.TransactionId;
 
 import java.util.*;
 import java.io.*;
+import java.util.stream.Stream;
 
 /**
  * Each instance of HeapPage stores data for one page of HeapFiles and 
@@ -73,19 +74,18 @@ public class HeapPage implements Page {
     */
     private int getNumTuples() {        
         // some code goes here
-        return 0;
-
+        // floor((BufferPool.getPageSize()*8) / (tuple size * 8 + 1))
+        return (int)Math.floor((BufferPool.getPageSize() * 8 * 1.0) / (td.getSize() * 8 + 1));
     }
 
     /**
      * Computes the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      * @return the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      */
-    private int getHeaderSize() {        
-        
+    private int getHeaderSize() {
         // some code goes here
-        return 0;
-                 
+        // ceiling(no. tuple slots / 8)
+        return (int)Math.ceil(getNumTuples() * 1.0 / 8);
     }
     
     /** Return a view of this page before it was modified
@@ -117,8 +117,8 @@ public class HeapPage implements Page {
      * @return the PageId associated with this page.
      */
     public HeapPageId getId() {
-    // some code goes here
-    throw new UnsupportedOperationException("implement this");
+        // some code goes here
+        return pid;
     }
 
     /**
@@ -288,7 +288,21 @@ public class HeapPage implements Page {
      */
     public int getNumEmptySlots() {
         // some code goes here
-        return 0;
+        int cnt = 0;
+        for (byte b : header) {
+            cnt += countByteZero(b);
+        }
+        return cnt;
+    }
+
+    public int countByteZero(byte b){
+        int cnt = 0;
+        for (int i = 0; i < 8; i++) {
+            if ((b & (1<<i)) == 0){
+                cnt++;
+            }
+        }
+        return cnt;
     }
 
     /**
@@ -296,7 +310,9 @@ public class HeapPage implements Page {
      */
     public boolean isSlotUsed(int i) {
         // some code goes here
-        return false;
+        int idx = i / 8;
+        int mod = i % 8;
+        return (header[idx] & (1<<mod)) > 0;
     }
 
     /**
@@ -313,7 +329,8 @@ public class HeapPage implements Page {
      */
     public Iterator<Tuple> iterator() {
         // some code goes here
-        return null;
+        Stream<Tuple> tupleStream = Arrays.stream(tuples).filter(tuple -> tuple != null);
+        return tupleStream.iterator();
     }
 
 }
