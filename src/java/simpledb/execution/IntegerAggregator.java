@@ -1,7 +1,13 @@
 package simpledb.execution;
 
 import simpledb.common.Type;
-import simpledb.storage.Tuple;
+import simpledb.storage.*;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Knows how to compute some aggregate over a set of IntFields.
@@ -9,7 +15,13 @@ import simpledb.storage.Tuple;
 public class IntegerAggregator implements Aggregator {
 
     private static final long serialVersionUID = 1L;
+    private static final Field NO_GROUPING_FIELD = new IntField(NO_GROUPING);
 
+    private final int gbfield;
+    private final Type gbfieldType;
+    private final int afield;
+    private final Op what;
+    private final ConcurrentMap<Field, List<Tuple>> groups = new ConcurrentHashMap();
     /**
      * Aggregate constructor
      * 
@@ -27,6 +39,10 @@ public class IntegerAggregator implements Aggregator {
 
     public IntegerAggregator(int gbfield, Type gbfieldtype, int afield, Op what) {
         // some code goes here
+        this.gbfield = gbfield;
+        this.gbfieldType = gbfieldtype;
+        this.afield = afield;
+        this.what = what;
     }
 
     /**
@@ -38,6 +54,19 @@ public class IntegerAggregator implements Aggregator {
      */
     public void mergeTupleIntoGroup(Tuple tup) {
         // some code goes here
+        if (tup == null) return;
+        // No group
+        if (this.gbfield == NO_GROUPING){
+            List<Tuple> groupTuples = groups.getOrDefault(NO_GROUPING_FIELD, new ArrayList<Tuple>());
+            groupTuples.add(tup);
+            groups.put(NO_GROUPING_FIELD,groupTuples);
+        }
+        // add to special group
+        else{
+            List<Tuple> groupTuples = groups.getOrDefault(tup.getField(gbfield), new ArrayList<Tuple>());
+            groupTuples.add(tup);
+            groups.put(tup.getField(gbfield),groupTuples);
+        }
     }
 
     /**
@@ -50,8 +79,50 @@ public class IntegerAggregator implements Aggregator {
      */
     public OpIterator iterator() {
         // some code goes here
-        throw new
-        UnsupportedOperationException("please implement me for lab2");
+        TupleDesc td = gbfield == NO_GROUPING? new TupleDesc(new Type[]{Type.INT_TYPE}):new TupleDesc(new Type[]{gbfieldType,Type.INT_TYPE});
+        return new TupleIterator(td,generateAggTuples(td));
     }
 
+    public List<Tuple> generateAggTuples(TupleDesc td){
+        List<Tuple> aggTuples = new ArrayList<>();
+        for (Map.Entry<Field, List<Tuple>> entry : groups.entrySet()) {
+            int aggregateVal = getAggResult(entry.getValue());
+            if (gbfield == NO_GROUPING){
+                // (aggregateVal)
+                Tuple tuple = new Tuple(td);
+                tuple.setField(0,new IntField(aggregateVal));
+                aggTuples.add(tuple);
+            }else{
+                // (groupVal, aggregateVal)
+                Tuple tuple = new Tuple(td);
+                tuple.setField(0,entry.getKey());
+                tuple.setField(1,new IntField(aggregateVal));
+                aggTuples.add(tuple);
+            }
+        }
+        return aggTuples;
+    }
+
+    private int getAggResult(List<Tuple> groupTuples){
+        if (what == Op.COUNT){
+            return groupTuples.size();
+        }else if (what == Op.MAX){
+            return groupTuples.stream()
+                    .mapToInt(s -> ((IntField) s.getField(afield)).getValue())
+                    .max().getAsInt();
+        }else if (what == Op.MIN){
+            return groupTuples.stream()
+                    .mapToInt(s -> ((IntField) s.getField(afield)).getValue())
+                    .min().getAsInt();
+        }else if (what == Op.SUM){
+            return groupTuples.stream()
+                    .mapToInt(s -> ((IntField) s.getField(afield)).getValue())
+                    .sum();
+        }else if (what == Op.AVG){
+            return (int)groupTuples.stream()
+                    .mapToInt(s -> ((IntField) s.getField(afield)).getValue())
+                    .average().getAsDouble();
+        }
+        throw new UnsupportedOperationException("unknown op type");
+    }
 }

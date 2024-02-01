@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.junit.After;
@@ -131,10 +132,10 @@ public class BufferPoolWriteTest extends TestUtil.CreateHeapFile {
     	// there should now be 10 tuples (on 10 different pages) in the buffer pool
     	DbFileIterator it = hfd.iterator(tid);
     	it.open();
-    	
+
     	int count = 0;
     	while(it.hasNext()) {
-    		it.next();
+			it.next();
     		count++;
     	}
     	assertEquals(10, count);

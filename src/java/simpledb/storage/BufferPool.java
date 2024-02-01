@@ -7,8 +7,12 @@ import simpledb.common.DeadlockException;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
+import javax.xml.crypto.Data;
 import java.io.*;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -36,7 +40,8 @@ public class BufferPool {
 
     private final int numPages;
 
-    private final ConcurrentMap<PageId,Page> cachePages;
+    private final LRUCache<PageId,Page> lruCache;
+
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -46,7 +51,7 @@ public class BufferPool {
     public BufferPool(int numPages) {
         // some code goes here
         this.numPages = numPages;
-        this.cachePages = new ConcurrentHashMap<>();
+        this.lruCache = new LRUCache<>(this.numPages);
     }
     
     public static int getPageSize() {
@@ -82,18 +87,14 @@ public class BufferPool {
         throws TransactionAbortedException, DbException {
         // some code goes here
         if (pid!=null){
-            if (this.cachePages.containsKey(pid)){
-                return this.cachePages.get(pid);
+            if (this.lruCache.get(pid) != null){
+                return this.lruCache.get(pid);
             }else{
                 // need to be add to buffer pool
-                if (this.cachePages.size()>=this.numPages){
-                    throw new DbException("Pages number has been up to max numPages!");
-                }else{
-                    DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
-                    Page page = file.readPage(pid);
-                    cachePages.put(pid,page);
-                    return page;
-                }
+                DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
+                Page page = file.readPage(pid);
+                lruCache.put(pid,page);
+                return page;
             }
         }
         // todo
@@ -162,6 +163,8 @@ public class BufferPool {
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
         // not necessary for lab1
+        HeapFile file = (HeapFile) Database.getCatalog().getDatabaseFile(tableId);
+        updateBufferPool(file.insertTuple(tid,t),tid);
     }
 
     /**
@@ -181,6 +184,16 @@ public class BufferPool {
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
         // not necessary for lab1
+        HeapFile file = (HeapFile) Database.getCatalog().getDatabaseFile(t.getRecordId().getPageId().getTableId());
+        updateBufferPool(file.deleteTuple(tid,t),tid);
+    }
+
+    private void updateBufferPool(List<Page> pages,TransactionId tid){
+        for (Page page : pages) {
+            page.markDirty(true,tid);
+            lruCache.put(page.getId(),page);
+        }
+
     }
 
     /**
@@ -191,7 +204,9 @@ public class BufferPool {
     public synchronized void flushAllPages() throws IOException {
         // some code goes here
         // not necessary for lab1
-
+        for (LRUNode<PageId, Page> value : this.lruCache.data.values()) {
+            flushPage(value.key);
+        }
     }
 
     /** Remove the specific page id from the buffer pool.
@@ -205,6 +220,7 @@ public class BufferPool {
     public synchronized void discardPage(PageId pid) {
         // some code goes here
         // not necessary for lab1
+        this.lruCache.remove(pid);
     }
 
     /**
@@ -214,6 +230,16 @@ public class BufferPool {
     private synchronized  void flushPage(PageId pid) throws IOException {
         // some code goes here
         // not necessary for lab1
+        Page page = lruCache.get(pid);
+        if (page == null) { return; }
+        TransactionId tid = page.isDirty();
+        // dirty
+        if (tid != null){
+            Page beforeImage = page.getBeforeImage();
+            Database.getLogFile().logWrite(tid,beforeImage,page);
+            Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(page);
+        }
+
     }
 
     /** Write all pages of the specified transaction to disk.
@@ -232,4 +258,103 @@ public class BufferPool {
         // not necessary for lab1
     }
 
+
+    private static class LRUCache<K,V> {
+
+        Map<K,LRUNode<K,V>> data;
+        Integer capacity;
+        LRUNode head;
+        LRUNode tail;
+
+        public LRUCache(int capacity) {
+            this.data = new ConcurrentHashMap<>();
+            this.capacity = capacity;
+            this.head = new LRUNode();
+            this.tail = new LRUNode();
+            this.head.next=tail;
+            this.tail.pre = head;
+        }
+
+        public synchronized int size(){
+            return this.data.size();
+        }
+
+
+        public synchronized V get(K key) {
+            boolean ok = data.containsKey(key);
+            if(ok){
+                // move to head;
+                LRUNode<K,V> node = data.get(key);
+                this.moveToHead(node);
+                return node.value;
+            }else{
+                return null;
+            }
+        }
+
+        public synchronized void put(K key, V value) {
+            boolean ok = data.containsKey(key);
+            if (ok){
+                LRUNode node = data.get(key);
+                node.value = value;
+                this.moveToHead(node);
+            }else{
+                int size = data.size();
+                if (size>=capacity){
+                    LRUNode removeNode = deleteLastNode();
+                    data.remove(removeNode.key);
+                }
+                LRUNode newNode = new LRUNode(key, value);
+                data.put(key,newNode);
+                this.addToHead(newNode);
+            }
+        }
+
+        public synchronized void remove(K key){
+            V v = get(key);
+            LRUNode node = (LRUNode) v;
+            Page page = (Page) node.value;
+            try {
+                Database.getBufferPool().flushPage(page.getId());
+            }catch (IOException e){
+                e.printStackTrace();
+            }
+            deleteNode((LRUNode)v);
+        }
+        public synchronized void deleteNode(LRUNode node){
+            node.pre.next = node.next;
+            node.next.pre = node.pre;
+        }
+        public synchronized void moveToHead(LRUNode node){
+            deleteNode(node);
+            addToHead(node);
+        }
+        public synchronized void addToHead(LRUNode node){
+            node.pre=head;
+            node.next=head.next;
+            head.next.pre=node;
+            head.next=node;
+        }
+        public synchronized LRUNode deleteLastNode(){
+            LRUNode lastNode = this.tail.pre;
+            lastNode.pre.next = this.tail;
+            this.tail.pre = lastNode.pre;
+            return lastNode;
+        }
+    }
+    private static class LRUNode<K,V>{
+        K key;
+        V value;
+        LRUNode pre;
+        LRUNode next;
+        public LRUNode() {}
+        public LRUNode(K key, V value) {
+            this.key = key;
+            this.value = value;
+        }
+    }
 }
+
+
+
+

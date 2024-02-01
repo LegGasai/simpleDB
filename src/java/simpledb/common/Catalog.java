@@ -24,18 +24,18 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class Catalog {
 
-    private ConcurrentMap<String,DbFile> name2Db;
-    private ConcurrentMap<String,String> name2Pk;
-    private ConcurrentMap<Integer,String> id2name;
+    private ConcurrentMap<String,DbFile> name2Db; //tableName to DbFile
+    private ConcurrentMap<String,String> name2Pk; //tableName to Pkey
+    private ConcurrentMap<Integer,String> id2name;//tableId to tableName
     /**
      * Constructor.
      * Creates a new, empty catalog.
      */
     public Catalog() {
         // some code goes here
-        this.name2Db = new ConcurrentHashMap<String,DbFile>(); //DB name to DbFile
-        this.name2Pk = new ConcurrentHashMap<String,String>(); //DB name to Pkey
-        this.id2name = new ConcurrentHashMap<Integer,String>(); //DB id to name
+        this.name2Db = new ConcurrentHashMap<String,DbFile>();
+        this.name2Pk = new ConcurrentHashMap<String,String>();
+        this.id2name = new ConcurrentHashMap<Integer,String>();
     }
 
     /**
