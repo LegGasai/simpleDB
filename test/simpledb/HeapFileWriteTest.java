@@ -7,12 +7,14 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 import junit.framework.JUnit4TestAdapter;
 import simpledb.common.Database;
+import simpledb.common.Permissions;
 import simpledb.common.Utility;
 import simpledb.storage.*;
 import simpledb.systemtest.SystemTestUtil;
 import simpledb.transaction.TransactionId;
 
 import java.util.Arrays;
+import java.util.Iterator;
 
 public class HeapFileWriteTest extends TestUtil.CreateHeapFile {
     private TransactionId tid;
