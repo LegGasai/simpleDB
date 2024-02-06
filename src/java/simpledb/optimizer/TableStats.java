@@ -1,15 +1,16 @@
 package simpledb.optimizer;
 
 import simpledb.common.Database;
+import simpledb.common.DbException;
 import simpledb.common.Type;
 import simpledb.execution.Predicate;
 import simpledb.execution.SeqScan;
 import simpledb.storage.*;
 import simpledb.transaction.Transaction;
+import simpledb.transaction.TransactionAbortedException;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
+import java.io.IOException;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -68,6 +69,17 @@ public class TableStats {
      */
     static final int NUM_HIST_BINS = 100;
 
+    private final int tableId;
+    private final int ioCostPerPage;
+    private final int pagesNum;
+    private final int tuplesNum;
+    private final TupleDesc td;
+    private final HeapFile dbFile;
+    private final ConcurrentHashMap<Integer,IntHistogram> intHistMap;
+    private final ConcurrentHashMap<Integer,StringHistogram> strHistMap;
+    private final ConcurrentHashMap<Integer,Integer> minMap;
+    private final ConcurrentHashMap<Integer,Integer> maxMap;
+    private final ConcurrentHashMap<Integer,Set<Field>> distinctMap;
     /**
      * Create a new TableStats object, that keeps track of statistics on each
      * column of a table
@@ -87,6 +99,83 @@ public class TableStats {
         // necessarily have to (for example) do everything
         // in a single scan of the table.
         // some code goes here
+        this.tableId = tableid;
+        this.ioCostPerPage = ioCostPerPage;
+        this.dbFile = (HeapFile) Database.getCatalog().getDatabaseFile(tableid);
+        this.pagesNum = this.dbFile.numPages();
+        this.td = dbFile.getTupleDesc();
+        this.intHistMap = new ConcurrentHashMap<>();
+        this.strHistMap = new ConcurrentHashMap<>();
+        this.minMap = new ConcurrentHashMap<>();
+        this.maxMap = new ConcurrentHashMap<>();
+        this.distinctMap = new ConcurrentHashMap<>();
+        this.tuplesNum = this.generateHistogram();
+
+    }
+
+    private int generateHistogram(){
+        int totalTuples = 0;
+        Transaction tx = new Transaction();
+        tx.start();
+        DbFileIterator it = dbFile.iterator(tx.getId());
+        try {
+            it.open();
+            while (it.hasNext()){
+                Tuple tuple = it.next();
+                totalTuples++;
+                for (int i = 0; i < this.td.numFields(); i++) {
+                    Field field = tuple.getField(i);
+                    Type type = field.getType();
+                    if (!distinctMap.containsKey(i)){
+                        distinctMap.put(i,new HashSet<>());
+                    }
+                    Set<Field> fieldSet = distinctMap.get(i);
+                    fieldSet.add(field);
+                    distinctMap.put(i,fieldSet);
+                    if (type.equals(Type.INT_TYPE)){
+                        // set max/min vale
+                        minMap.put(i,Math.min(minMap.getOrDefault(i,Integer.MAX_VALUE),((IntField)field).getValue()));
+                        maxMap.put(i,Math.max(maxMap.getOrDefault(i,Integer.MIN_VALUE),((IntField)field).getValue()));
+                    }else if (type.equals((Type.STRING_TYPE))){
+                        if (!strHistMap.containsKey(i)){
+                            strHistMap.put(i,new StringHistogram(NUM_HIST_BINS));
+                        }
+                    }
+                }
+            }
+            for (int i = 0; i < this.td.numFields(); i++) {
+                if (minMap.containsKey(i)){
+                    this.intHistMap.put(i,new IntHistogram(NUM_HIST_BINS,minMap.get(i),maxMap.get(i)));
+                }
+            }
+            it.rewind();
+            while (it.hasNext()){
+                Tuple tuple = it.next();
+                for (int i = 0; i < this.td.numFields(); i++) {
+                    Field field = tuple.getField(i);
+                    Type type = field.getType();
+                    if (type.equals(Type.INT_TYPE)){
+                        IntHistogram intHistogram = intHistMap.get(i);
+                        intHistogram.addValue(((IntField)field).getValue());
+                    }else if (type.equals(Type.STRING_TYPE)){
+                        StringHistogram strHistogram = strHistMap.get(i);
+                        strHistogram.addValue(((StringField)field).getValue());
+                    }
+                }
+            }
+        }catch (Exception e){
+            System.out.println("generateHistogram error!");
+            e.printStackTrace();
+        }finally {
+            it.close();
+            try {
+                tx.commit();
+            } catch (IOException e) {
+                System.out.println("transaction commit error!");
+                e.printStackTrace();
+            }
+        }
+        return totalTuples;
     }
 
     /**
@@ -103,7 +192,7 @@ public class TableStats {
      */
     public double estimateScanCost() {
         // some code goes here
-        return 0;
+        return this.pagesNum * ioCostPerPage * 2.0;
     }
 
     /**
@@ -117,7 +206,7 @@ public class TableStats {
      */
     public int estimateTableCardinality(double selectivityFactor) {
         // some code goes here
-        return 0;
+        return (int)(selectivityFactor*tuplesNum);
     }
 
     /**
@@ -132,6 +221,12 @@ public class TableStats {
      * */
     public double avgSelectivity(int field, Predicate.Op op) {
         // some code goes here
+        Type type = this.td.getFieldType(field);
+        if (type.equals(Type.INT_TYPE)){
+            return this.intHistMap.get(field).avgSelectivity();
+        }else if (type.equals(Type.STRING_TYPE)){
+            return this.strHistMap.get(field).avgSelectivity();
+        }
         return 1.0;
     }
 
@@ -150,7 +245,26 @@ public class TableStats {
      */
     public double estimateSelectivity(int field, Predicate.Op op, Field constant) {
         // some code goes here
+        Type type = constant.getType();
+        if (type.equals(Type.INT_TYPE)){
+            return this.intHistMap.get(field).estimateSelectivity(op,((IntField)constant).getValue());
+        }else if (type.equals(Type.STRING_TYPE)){
+            return this.strHistMap.get(field).estimateSelectivity(op,((StringField)constant).getValue());
+        }
         return 1.0;
+    }
+
+    /**
+     * Get the number of distinct field value
+     * @param field The index of field
+     * @return The number of distinct field value
+     */
+    public int getFieldDistinct(int field){
+        if (this.distinctMap.containsKey(field)){
+            return this.distinctMap.get(field).size();
+        }else{
+            return this.tuplesNum;
+        }
     }
 
     /**
@@ -158,7 +272,7 @@ public class TableStats {
      * */
     public int totalTuples() {
         // some code goes here
-        return 0;
+        return this.tuplesNum;
     }
 
 }

@@ -4,17 +4,14 @@ import org.junit.Test;
 import simpledb.common.Database;
 import simpledb.common.Type;
 import simpledb.execution.*;
-import simpledb.storage.HeapFile;
-import simpledb.storage.IntField;
-import simpledb.storage.Tuple;
-import simpledb.storage.TupleDesc;
+import simpledb.optimizer.IntHistogram;
+import simpledb.optimizer.JoinOptimizer;
+import simpledb.storage.*;
 import simpledb.transaction.TransactionId;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -103,5 +100,55 @@ public class LocalTest {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+
+    @Test
+    public void test3(){
+        IntHistogram h = new IntHistogram(3,-10,0);
+        for (int i = 0; i < 11; i++) {
+            h.addValue(i-10);
+        }
+        System.out.println(h.toString());
+        System.out.println(h.estimateSelectivity(Predicate.Op.GREATER_THAN,-1));
+    }
+
+    @Test
+    public void test4(){
+
+    }
+
+    public double getCost(Integer key){
+        HashMap<Integer, Double> integerIntegerHashMap = new HashMap<>();
+        return integerIntegerHashMap.get(key);
+    }
+
+    @Test
+    public void test5(){
+        ConcurrentHashMap<Integer,Set<Field>> map = new ConcurrentHashMap<>();
+        for (int i = 0; i < 6; i++) {
+            for (int j = 0; j < 3; j++) {
+                if (!map.containsKey(j)){
+                    map.put(j,new HashSet<>());
+                }
+                Set<Field> s = map.get(j);
+                s.add(new IntField(i%2));
+                map.put(j,s);
+            }
+        }
+        System.out.println(map);
+        System.out.println(map.get(0).size());
+        System.out.println(map.get(1).size());
+        System.out.println(map.get(2).size());
+    }
+
+    @Test
+    public void test6(){
+        List<Integer> lst = Arrays.asList(1, 2, 3,4,5,6,7,8,9,10,11,12);
+        Set<Set<Integer>> sets = new JoinOptimizer(null, null).enumerateSubsets(lst, 13);
+        for (Set<Integer> set : sets) {
+            System.out.println(set);
+        }
+        System.out.println(sets.size());
     }
 }
