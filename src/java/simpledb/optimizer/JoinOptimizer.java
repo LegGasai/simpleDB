@@ -3,6 +3,7 @@ package simpledb.optimizer;
 import simpledb.common.Database;
 import simpledb.ParsingException;
 import simpledb.execution.*;
+import simpledb.storage.Field;
 import simpledb.storage.TupleDesc;
 
 import java.util.*;
@@ -130,7 +131,7 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            return -1.0;
+            return card1 * card2 * 1.0 + cost1 + card1 * cost2;
         }
     }
 
@@ -176,6 +177,30 @@ public class JoinOptimizer {
                                                    Map<String, Integer> tableAliasToId) {
         int card = 1;
         // some code goes here
+        if (joinOp.equals(Predicate.Op.EQUALS)){
+            if (t1pkey || t2pkey){
+                if (t1pkey && !t2pkey){
+                    card = card2;
+                }else if (!t1pkey && t2pkey){
+                    card = card1;
+                }else{
+                    card = Math.min(card1,card2);
+                }
+            }else{
+                // improved method
+                Integer tabldId1 = tableAliasToId.get(table1Alias);
+                Integer tabldId2 = tableAliasToId.get(table2Alias);
+                String tableName1 = Database.getCatalog().getTableName(tabldId1);
+                String tableName2 = Database.getCatalog().getTableName(tabldId2);
+                TableStats stats1 = stats.get(tableName1);
+                TableStats stats2 = stats.get(tableName2);
+                int distinct1 = stats1.getFieldDistinct(Database.getCatalog().getTupleDesc(tabldId1).fieldNameToIndex(field1PureName));
+                int distinct2 = stats2.getFieldDistinct(Database.getCatalog().getTupleDesc(tabldId2).fieldNameToIndex(field2PureName));
+                return (int)((card1 * card2 * 1.0)/(Math.max(distinct1,distinct2)));
+            }
+        }else{
+            return Math.max((int)(0.3*(card1 * card2)),Math.max(card1,card2));
+        }
         return card <= 0 ? 1 : card;
     }
 
@@ -191,25 +216,43 @@ public class JoinOptimizer {
      */
     public <T> Set<Set<T>> enumerateSubsets(List<T> v, int size) {
         Set<Set<T>> els = new HashSet<>();
-        els.add(new HashSet<>());
-        // Iterator<Set> it;
-        // long start = System.currentTimeMillis();
-
-        for (int i = 0; i < size; i++) {
-            Set<Set<T>> newels = new HashSet<>();
-            for (Set<T> s : els) {
-                for (T t : v) {
-                    Set<T> news = new HashSet<>(s);
-                    if (news.add(t))
-                        newels.add(news);
-                }
-            }
-            els = newels;
-        }
-
+        //els.add(new HashSet<>());
+        //// Iterator<Set> it;
+        //// long start = System.currentTimeMillis();
+        //
+        //for (int i = 0; i < size; i++) {
+        //    Set<Set<T>> newels = new HashSet<>();
+        //    for (Set<T> s : els) {
+        //        for (T t : v) {
+        //            Set<T> news = new HashSet<>(s);
+        //            if (news.add(t))
+        //                newels.add(news);
+        //        }
+        //    }
+        //    els = newels;
+        //}
+        //
+        //return els;
+        dfs(els,new HashSet<>(),v,size,0);
         return els;
-
     }
+
+    private <T> void dfs(Set<Set<T>> res, Set<T> path,List<T> v,int size,int idx){
+        if (idx == v.size()||path.size() == size){
+            if (path.size() == size){
+                res.add(new HashSet<>(path));
+            }
+            return;
+        }
+        if (size-path.size()>(v.size()-idx)){
+            return;
+        }
+        dfs(res,path,v,size,idx+1);
+        path.add(v.get(idx));
+        dfs(res,path,v,size,idx+1);
+        path.remove(v.get(idx));
+    }
+
 
     /**
      * Compute a logical, reasonably efficient join on the specified tables. See
@@ -238,7 +281,36 @@ public class JoinOptimizer {
 
         // some code goes here
         //Replace the following
-        return joins;
+        PlanCache pc = new PlanCache();
+        CostCard bCard = null;
+        for (int i = 1; i <= this.joins.size(); i++) {
+            Set<Set<LogicalJoinNode>> jsSets = enumerateSubsets(this.joins, i);
+            for (Set<LogicalJoinNode> s : jsSets) {
+                CostCard bestCard = null;
+                for (LogicalJoinNode remove : s) {
+                    CostCard costCard = computeCostAndCardOfSubplan(stats, filterSelectivities, remove, s, bestCard==null?Double.MAX_VALUE:bestCard.cost, pc);
+                    if (costCard!=null){
+                        if (bestCard==null || (bestCard!=null&&costCard.cost<bestCard.cost)){
+                            bestCard = costCard;
+                            if (i==this.joins.size()){
+                                bCard = costCard;
+                            }
+                        }
+                    }
+                }
+                if (bestCard!=null){
+                    pc.addPlan(s,bestCard.cost,bestCard.card,bestCard.plan);
+                }
+            }
+        }
+        List<LogicalJoinNode> js = this.joins;
+        if (bCard!=null){
+            js = bCard.plan;
+        }
+        if (explain){
+            printJoins(js,pc,stats,filterSelectivities);
+        }
+        return js;
     }
 
     // ===================== Private Methods =================================

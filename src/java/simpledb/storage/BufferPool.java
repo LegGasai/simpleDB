@@ -4,12 +4,14 @@ import simpledb.common.Database;
 import simpledb.common.Permissions;
 import simpledb.common.DbException;
 import simpledb.common.DeadlockException;
+import simpledb.transaction.LockManager;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
 import javax.xml.crypto.Data;
 import java.io.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +44,7 @@ public class BufferPool {
 
     private final LRUCache<PageId,Page> lruCache;
 
-
+    private final LockManager lockManager;
     /**
      * Creates a BufferPool that caches up to numPages pages.
      *
@@ -52,6 +54,7 @@ public class BufferPool {
         // some code goes here
         this.numPages = numPages;
         this.lruCache = new LRUCache<>(this.numPages);
+        this.lockManager = new LockManager();
     }
     
     public static int getPageSize() {
@@ -87,6 +90,13 @@ public class BufferPool {
         throws TransactionAbortedException, DbException {
         // some code goes here
         if (pid!=null){
+            try {
+                if (!lockManager.grantLock(tid,pid,perm,0)){
+                    throw new TransactionAbortedException();
+                }
+            }catch (InterruptedException e){
+                System.out.println("getPage()获取锁异常:"+e);
+            }
             if (this.lruCache.get(pid) != null){
                 return this.lruCache.get(pid);
             }else{
@@ -113,6 +123,7 @@ public class BufferPool {
     public  void unsafeReleasePage(TransactionId tid, PageId pid) {
         // some code goes here
         // not necessary for lab1|lab2
+        lockManager.releaseLock(pid,tid);
     }
 
     /**
@@ -123,13 +134,14 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid) {
         // some code goes here
         // not necessary for lab1|lab2
+        transactionComplete(tid,true);
     }
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
         // some code goes here
         // not necessary for lab1|lab2
-        return false;
+        return lockManager.holdsLock(tid,p);
     }
 
     /**
@@ -142,6 +154,32 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid, boolean commit) {
         // some code goes here
         // not necessary for lab1|lab2
+        if (commit){
+            try {
+                flushPages(tid);
+            }catch (IOException e){
+                e.printStackTrace();
+            }
+
+        }else{
+            try {
+                rollback(tid);
+            }catch (DbException e){
+                e.printStackTrace();
+            }
+        }
+        // release all lock hold by tid
+        lockManager.releaseByTid(tid);
+    }
+
+    public synchronized void rollback(TransactionId tid) throws DbException{
+        List<Page> pages = getPagesByTid(tid);
+        for (Page page : pages) {
+            PageId pageId = page.getId();
+            Page originPage = Database.getCatalog().getDatabaseFile(pageId.getTableId()).readPage(pageId);
+            // recovery page
+            lruCache.put(pageId,originPage);
+        }
     }
 
     /**
@@ -188,12 +226,12 @@ public class BufferPool {
         updateBufferPool(file.deleteTuple(tid,t),tid);
     }
 
-    private void updateBufferPool(List<Page> pages,TransactionId tid){
+
+    private void updateBufferPool(List<Page> pages,TransactionId tid) throws DbException{
         for (Page page : pages) {
             page.markDirty(true,tid);
             lruCache.put(page.getId(),page);
         }
-
     }
 
     /**
@@ -238,8 +276,8 @@ public class BufferPool {
             Page beforeImage = page.getBeforeImage();
             Database.getLogFile().logWrite(tid,beforeImage,page);
             Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(page);
+            page.markDirty(false,null);
         }
-
     }
 
     /** Write all pages of the specified transaction to disk.
@@ -247,7 +285,26 @@ public class BufferPool {
     public synchronized  void flushPages(TransactionId tid) throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
+        List<Page> pages = getPagesByTid(tid);
+        for (Page page : pages) {
+            Page beforeImage = page.getBeforeImage();
+            Database.getLogFile().logWrite(tid,beforeImage,page);
+            Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+            page.markDirty(false,null);
+        }
     }
+
+    private synchronized List<Page> getPagesByTid(TransactionId tid){
+        List<Page> pages = new ArrayList<>();
+        for (Map.Entry<PageId, LRUNode<PageId, Page>> entry : this.lruCache.data.entrySet()) {
+            Page page = entry.getValue().value;
+            if (page.isDirty()!=null && page.isDirty().equals(tid)){
+                pages.add(page);
+            }
+        }
+        return pages;
+    }
+
 
     /**
      * Discards a page from the buffer pool.
@@ -292,7 +349,7 @@ public class BufferPool {
             }
         }
 
-        public synchronized void put(K key, V value) {
+        public synchronized void put(K key, V value) throws DbException{
             boolean ok = data.containsKey(key);
             if (ok){
                 LRUNode node = data.get(key);
@@ -301,7 +358,11 @@ public class BufferPool {
             }else{
                 int size = data.size();
                 if (size>=capacity){
+                    // evict the last recently used page
                     LRUNode removeNode = deleteLastNode();
+                    if (removeNode == null){
+                        throw new DbException("缓冲区全为脏页，没有剩余空间！");
+                    }
                     data.remove(removeNode.key);
                 }
                 LRUNode newNode = new LRUNode(key, value);
@@ -336,9 +397,20 @@ public class BufferPool {
             head.next=node;
         }
         public synchronized LRUNode deleteLastNode(){
-            LRUNode lastNode = this.tail.pre;
-            lastNode.pre.next = this.tail;
-            this.tail.pre = lastNode.pre;
+            LRUNode lastNode = null;
+            LRUNode curNode = this.tail.pre;
+            while (curNode!=null&&curNode!=this.head){
+                if (((Page)curNode.value).isDirty() != null){
+                    curNode = curNode.pre;
+                }else{
+                    lastNode = curNode;
+                    break;
+                }
+            }
+            if (lastNode == null) {
+                return lastNode;
+            }
+            deleteNode(lastNode);
             return lastNode;
         }
     }
