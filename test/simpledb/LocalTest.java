@@ -2,11 +2,13 @@ package simpledb;
 
 import org.junit.Test;
 import simpledb.common.Database;
+import simpledb.common.Permissions;
 import simpledb.common.Type;
 import simpledb.execution.*;
 import simpledb.optimizer.IntHistogram;
 import simpledb.optimizer.JoinOptimizer;
 import simpledb.storage.*;
+import simpledb.transaction.LockManager;
 import simpledb.transaction.TransactionId;
 
 import java.io.File;
@@ -144,11 +146,96 @@ public class LocalTest {
 
     @Test
     public void test6(){
-        List<Integer> lst = Arrays.asList(1, 2, 3,4,5,6,7,8,9,10,11,12);
-        Set<Set<Integer>> sets = new JoinOptimizer(null, null).enumerateSubsets(lst, 13);
+        List<Integer> lst = Arrays.asList(1, 2, 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20);
+        Set<Set<Integer>> sets = new JoinOptimizer(null, null).enumerateSubsets(lst, 10);
         for (Set<Integer> set : sets) {
             System.out.println(set);
         }
         System.out.println(sets.size());
+    }
+
+    @Test
+    public void test7(){
+        Example example = new Example();
+        Caller caller1 = new Caller(example,1);
+        Caller caller2 = new Caller(example, 2);
+        Thread thread1 = new Thread(() -> caller1.call());
+        Thread thread2 = new Thread(() -> caller2.call());
+        thread1.start();
+        thread2.start();
+        try {
+            thread1.join();
+            thread2.join();
+        }catch (Exception e){
+
+        }
+    }
+
+    @Test
+    public void test8() throws Exception{
+        Counter counter = new Counter();
+        Thread thread1 = new Thread(() -> {
+            for (int i = 0; i < 2000; i++) {
+                try {
+                    counter.add();
+                    //Thread.sleep(1);
+                }catch (Exception e){
+
+                }
+            }
+        });
+        Thread thread2 = new Thread(() -> {
+            for (int i = 0; i < 2000; i++) {
+                try {
+                    counter.add();
+                    //Thread.sleep(1);
+                }catch (Exception e){
+
+                }
+            }
+        });
+        thread1.start();
+        thread2.start();
+        thread1.join();
+        thread2.join();
+        counter.show();
+    }
+}
+
+class Example {
+    public void exampleMethod(int i) {
+        // 方法实现
+        System.out.println("Start:"+i);
+        try {
+            Thread.sleep(1000);
+        }catch (Exception e){
+            System.out.println(e);
+        }
+        System.out.println("Finish:"+i);
+    }
+}
+
+class Caller{
+    private Example executor;
+    private int i;
+    public Caller(Example executor,int i) {
+        this.executor = executor;
+        this.i = i;
+    }
+
+    public void call(){
+        executor.exampleMethod(i);
+    }
+}
+
+class Counter{
+    private int count = 0;
+
+    public void add() throws Exception{
+        count++;
+    }
+
+    public void show(){
+        System.out.println(count);
     }
 }

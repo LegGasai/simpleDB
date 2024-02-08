@@ -77,10 +77,10 @@ public class IntHistogram {
                 return estimateGreat(v);
             }
             case LESS_THAN:{
-                return 1-(estimateSelectivity(Predicate.Op.GREATER_THAN_OR_EQ,v));
+                return 1.0-(estimateSelectivity(Predicate.Op.GREATER_THAN_OR_EQ,v));
             }
             case LESS_THAN_OR_EQ:{
-                return 1-estimateGreat(v);
+                return 1.0-estimateGreat(v);
             }
             case GREATER_THAN_OR_EQ:{
                 return estimateGreat(v)+estimateEqual(v);
