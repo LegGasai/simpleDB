@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @Description:
  */
 public class LockManager {
+
     /**
      * PageId -> set of pageLocks
      */
@@ -93,7 +94,7 @@ public class LockManager {
                         lock.updateToXLock();
                         return true;
                     }
-                    wait(50);
+                    wait(200);
                     return grantLock(tid,pageId,perm,retry+1);
                 }
             }
@@ -110,7 +111,7 @@ public class LockManager {
                 tid2Locks.put(tid,tidLockSet);
                 return true;
             }else{
-                wait(50);
+                wait(200);
                 return grantLock(tid,pageId,perm,retry+1);
             }
         }
@@ -150,7 +151,7 @@ public class LockManager {
         return getLockByPidAndTid(tid,pageId) != null;
     }
 
-    /** Constants used for return codes in Field.compare */
+    /** Constants used for LockType */
     public enum LockType implements Serializable {
         XLOCK,SLOCK;
 
@@ -211,6 +212,5 @@ public class LockManager {
             return this.pageId.equals(p1.pageId) && this.tid.equals(p1.tid);
         }
     }
-
 
 }
