@@ -55,7 +55,7 @@ public class Transaction {
 
             // write commit log record
             if (!abort) {
-            	Database.getLogFile().logCommit(tid);
+                Database.getLogFile().logCommit(tid);
             }
 
             //setting this here means we could possibly write multiple abort records -- OK?
