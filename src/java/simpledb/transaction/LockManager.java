@@ -36,12 +36,14 @@ public class LockManager {
      * @param pageId pid of page
      */
     public synchronized void releaseLock(PageId pageId,TransactionId tid){
+
         PageLock lock = getLockByPidAndTid(tid, pageId);
         if (lock!=null){
             HashSet<PageLock> pageLocks = pid2Locks.get(pageId);
             HashSet<PageLock> tidLocks = tid2Locks.get(tid);
             pageLocks.remove(lock);
             tidLocks.remove(lock);
+            System.out.printf("tid:[%d] release lock on page[%d]\n",tid.getId(),pageId.getPageNumber());
             if (pageLocks.isEmpty()){
                 pid2Locks.remove(pageId);
             }
@@ -61,6 +63,7 @@ public class LockManager {
             HashSet<PageLock> tidLocks = tid2Locks.get(tid);
             for (PageLock lock : tidLocks) {
                 PageId pageId = lock.getPageId();
+                System.out.printf("tid:[%d] release lock on page[%d]\n",tid.getId(),pageId.getPageNumber());
                 if (pid2Locks.containsKey(pageId)){
                     HashSet<PageLock> pageLocks = pid2Locks.get(pageId);
                     pageLocks.remove(lock);
@@ -69,22 +72,25 @@ public class LockManager {
                     }
                 }
             }
-            this.notifyAll();
             tid2Locks.remove(tid);
+            this.notifyAll();
         }
     }
 
     public synchronized boolean grantLock(TransactionId tid, PageId pageId, Permissions perm, int retry) throws InterruptedException{
-        if (retry == 3){
+        if (retry == 8){
+            System.out.printf("tid:[%d] acquire [%s] on page[%d] fail\n",tid.getId(),perm,pageId.getPageNumber());
             return false;
         }
         //holds the lock originally
         PageLock lock = getLockByPidAndTid(tid, pageId);
         if (lock!=null){
             if (perm == Permissions.READ_ONLY){
+                System.out.printf("tid:[%d] acquire [%s] on page[%d]\n",tid.getId(),perm,pageId.getPageNumber());
                 return true;
             }else if (perm == Permissions.READ_WRITE){
                 if (lock.getType().equals(LockType.XLOCK)){
+                    System.out.printf("tid:[%d] acquire [%s] on page[%d]\n",tid.getId(),perm,pageId.getPageNumber());
                     return true;
                 }else if (lock.getType().equals(LockType.SLOCK)){
                     // try to update lock
@@ -92,9 +98,10 @@ public class LockManager {
                     if (locksByPid!=null&&locksByPid.size()==1){
                         // update to XLock
                         lock.updateToXLock();
+                        System.out.printf("tid:[%d] update its lock [%s] on page[%d]\n",tid.getId(),perm,pageId.getPageNumber());
                         return true;
                     }
-                    wait(200);
+                    wait(25 * (retry + 1) * (retry + 1));
                     return grantLock(tid,pageId,perm,retry+1);
                 }
             }
@@ -109,9 +116,10 @@ public class LockManager {
                 tidLockSet.add(pageLock);
                 pid2Locks.put(pageId,pageLockSet);
                 tid2Locks.put(tid,tidLockSet);
+                System.out.printf("tid:[%d] acquire [%s] on page[%d]\n",tid.getId(),perm,pageId.getPageNumber());
                 return true;
             }else{
-                wait(200);
+                wait(25 * (retry + 1) * (retry + 1));
                 return grantLock(tid,pageId,perm,retry+1);
             }
         }
