@@ -85,7 +85,7 @@ public class LogTest extends SimpleDbTestBase {
         Database.getBufferPool().flushAllPages(); // XXX defeat NO-STEAL-based abort
         Database.getLogFile().logAbort(t.getId()); // does rollback too
         Database.getBufferPool().flushAllPages(); // prevent NO-STEAL-based abort from
-                                                  // un-doing the rollback
+        // un-doing the rollback
         Database.getBufferPool().transactionComplete(t.getId(), false); // release locks
     }
 

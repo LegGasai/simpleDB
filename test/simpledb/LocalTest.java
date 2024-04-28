@@ -200,6 +200,20 @@ public class LocalTest {
         thread2.join();
         counter.show();
     }
+
+    @Test
+    public void test9(){
+        ArrayList<String> lst = new ArrayList<>(Arrays.asList("1", "2", "3", "4"));
+        Iterator<String> it = lst.iterator();
+        while (it.hasNext()){
+            String next = it.next();
+            System.out.println(next);
+            lst.remove(next);
+        }
+        System.out.println(lst);
+
+
+    }
 }
 
 class Example {

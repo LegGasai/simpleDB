@@ -5,6 +5,7 @@ import simpledb.common.Database;
 import simpledb.transaction.TransactionId;
 import simpledb.common.Debug;
 
+import javax.xml.crypto.Data;
 import java.io.*;
 import java.util.*;
 import java.lang.reflect.*;
@@ -140,7 +141,7 @@ public class LogFile {
     public synchronized int getTotalRecords() {
         return totalRecords;
     }
-    
+
     /** Write an abort record to the log for the specified tid, force
         the log to disk, and perform a rollback
         @param tid The aborting transaction.
@@ -460,6 +461,37 @@ public class LogFile {
             synchronized(this) {
                 preAppend();
                 // some code goes here
+                //print();
+                Long lsn = tidToFirstLogRecord.get(tid.getId());
+                HashSet<PageId> set = new HashSet<>();
+                raf.seek(lsn);
+                while (true){
+                    try {
+                        int type = raf.readInt();
+                        long curTid = raf.readLong();
+                        switch (type){
+                            case CHECKPOINT_RECORD:
+                                int numXactions = raf.readInt();
+                                while (numXactions-- > 0) {
+                                    long xid = raf.readLong();
+                                    long xoffset = raf.readLong();
+                                }
+                                break;
+                            case UPDATE_RECORD:
+                                Page beforePage = readPageData(raf);
+                                Page curPage = readPageData(raf);
+                                if (curTid == tid.getId() && !set.contains(beforePage.getId())){
+                                    set.add(beforePage.getId());
+                                    DbFile dbFile = Database.getCatalog().getDatabaseFile(beforePage.getId().getTableId());
+                                    dbFile.writePage(beforePage);
+                                    Database.getBufferPool().discardPage(curPage.getId());
+                                }
+                        }
+                        raf.readLong();
+                    }catch (EOFException E){
+                        break;
+                    }
+                }
             }
         }
     }
@@ -478,6 +510,34 @@ public class LogFile {
         }
     }
 
+    private synchronized long getRecoverOffset(){
+        try{
+            raf.seek(0);
+            long checkPoint = raf.readLong();
+            // no checkpoint
+            if (checkPoint == -1){
+                return -1L;
+            }else{
+                // 返回检查点记录的所有事务中第一条记录偏移量
+                // 即最小lsn
+                raf.seek(checkPoint);
+                raf.readInt();
+                raf.readLong();
+                long minXactionOffset = Long.MAX_VALUE;
+                int numXactions = raf.readInt();
+                while (numXactions-- > 0) {
+                    long xid = raf.readLong();
+                    long xoffset = raf.readLong();
+                    minXactionOffset = Math.min(minXactionOffset,xoffset);
+                }
+                return minXactionOffset;
+            }
+        }catch (IOException e){
+            e.printStackTrace();
+            throw new RuntimeException();
+        }
+    }
+
     /** Recover the database system by ensuring that the updates of
         committed transactions are installed and that the
         updates of uncommitted transactions are not installed.
@@ -487,6 +547,56 @@ public class LogFile {
             synchronized (this) {
                 recoveryUndecided = false;
                 // some code goes here
+                List<AbstractMap.SimpleEntry<Long, Page[]>> records = new ArrayList<>();
+                HashSet<Long> committed = new HashSet<>();
+                long recoverOffset = getRecoverOffset();
+                if (recoverOffset != -1L){
+                    raf.seek(recoverOffset);
+                }
+                while (true){
+                    try {
+                        int type = raf.readInt();
+                        Long curTid = raf.readLong();
+                        switch (type){
+                            case COMMIT_RECORD:
+                                committed.add(curTid);
+                                break;
+                            case CHECKPOINT_RECORD:
+                                int numXactions = raf.readInt();
+                                while (numXactions-- > 0) {
+                                    raf.readLong();
+                                    raf.readLong();
+                                }
+                                break;
+                            case UPDATE_RECORD:
+                                Page before = readPageData(raf);
+                                Page after = readPageData(raf);
+                                AbstractMap.SimpleEntry<Long, Page[]> record = new AbstractMap.SimpleEntry<>(curTid, new Page[]{before, after});
+                                records.add(record);
+                                break;
+                        }
+                        raf.readLong();
+                    }catch (IOException e){
+                        break;
+                    }
+                }
+                // undo first, and then redo
+                // undo —— recover in reverse order
+                for (int i = records.size() -1 ; i >= 0 ; i--) {
+                    AbstractMap.SimpleEntry<Long, Page[]> entry = records.get(i);
+                    if (!committed.contains(entry.getKey())){
+                        Page before = entry.getValue()[0];
+                        Database.getCatalog().getDatabaseFile(before.getId().getTableId()).writePage(before);
+                    }
+                }
+                // redo —— recover in order
+                for (int i = 0 ; i < records.size() ; i++) {
+                    AbstractMap.SimpleEntry<Long, Page[]> entry = records.get(i);
+                    if (committed.contains(entry.getKey())){
+                        Page after = entry.getValue()[1];
+                        Database.getCatalog().getDatabaseFile(after.getId().getTableId()).writePage(after);
+                    }
+                }
             }
          }
     }

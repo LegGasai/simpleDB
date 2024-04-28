@@ -214,7 +214,6 @@ public class BTreeFileDeleteTest extends SimpleDbTestBase {
 		
 		int totalEntries = page.getNumEntries() + sibling.getNumEntries();
 		int entriesToSteal = totalEntries/2 - page.getNumEntries();
-		
 		Map<PageId, Page> dirtypages = new HashMap<>();
 		dirtypages.put(pageId, page);
 		dirtypages.put(siblingId, sibling);
