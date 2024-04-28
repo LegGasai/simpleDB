@@ -84,6 +84,7 @@ public class BufferPool {
         if (pid!=null){
             try {
                 if (!lockManager.grantLock(tid,pid,perm,0)){
+                    System.out.printf("the page[%d] is being using by other transaction\n",pid.getPageNumber());
                     throw new TransactionAbortedException();
                 }
             }catch (InterruptedException e){
@@ -336,7 +337,7 @@ public class BufferPool {
             this.tail.pre = head;
         }
 
-        public synchronized int size(){
+        public int size(){
             return this.data.size();
         }
 
@@ -358,20 +359,19 @@ public class BufferPool {
             if (ok){
                 LRUNode node = data.get(key);
                 node.value = value;
-                this.moveToHead(node);
+                moveToHead(node);
             }else{
                 int size = data.size();
-                if (size>=capacity){
+                if (size >= capacity){
                     // evict the last recently used page
-                    LRUNode removeNode = deleteLastNode();
+                    LRUNode removeNode = evictUndirty();
                     if (removeNode == null){
                         throw new DbException("缓冲区全为脏页，没有剩余空间！");
                     }
-                    data.remove(removeNode.key);
                 }
                 LRUNode newNode = new LRUNode(key, value);
                 data.put(key,newNode);
-                this.addToHead(newNode);
+                addToHead(newNode);
             }
         }
 
@@ -383,21 +383,23 @@ public class BufferPool {
             data.remove(key);
             deleteNode(node);
         }
-        public synchronized void deleteNode(LRUNode node){
+
+        private void deleteNode(LRUNode node){
             node.pre.next = node.next;
             node.next.pre = node.pre;
         }
-        public synchronized void moveToHead(LRUNode node){
+        private void moveToHead(LRUNode node){
             deleteNode(node);
             addToHead(node);
         }
-        public synchronized void addToHead(LRUNode node){
+        private void addToHead(LRUNode node){
             node.pre=head;
             node.next=head.next;
             head.next.pre=node;
             head.next=node;
         }
-        public synchronized LRUNode deleteLastNode(){
+
+        private LRUNode evictUndirty(){
             LRUNode lastNode = null;
             LRUNode curNode = this.tail.pre;
             while (curNode!=null&&curNode!=this.head){
@@ -412,6 +414,7 @@ public class BufferPool {
                 return lastNode;
             }
             deleteNode(lastNode);
+            data.remove(lastNode.key);
             return lastNode;
         }
     }
@@ -429,7 +432,7 @@ public class BufferPool {
 }
 
 
-
+//
 //package simpledb.storage;
 //
 //import simpledb.common.Database;
