@@ -78,7 +78,7 @@ public class BTreeFileInsertTest extends SimpleDbTestBase {
 			int value = ((IntField) t.getField(0)).getValue();
 			assertTrue(value >= prev);
 			prev = value;
-		} 
+		}
 	}
 
 	@Test public void addDuplicateTuples() throws Exception {
